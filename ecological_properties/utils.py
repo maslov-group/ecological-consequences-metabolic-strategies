@@ -499,7 +499,7 @@ def tsolve_iter(G, RE, taus, tau_mod, logD):
         # if(1):
             t_iter = np.linalg.inv(G*(S>0))@rhs
             S, tau_mod = niche_growth_state(RE, taus, t_iter)
-            if (t_iter_compare==t_iter).all():
+            if ((t_iter_compare==t_iter).all() and np.sum(t_iter)<=24):
                 converged = 1
                 break
             t_iter_compare = t_iter
@@ -508,10 +508,11 @@ def tsolve_iter(G, RE, taus, tau_mod, logD):
             break
     return converged, t_iter, S, tau_mod
 
-def F_mat_lag(g, pref_list, dep_order, logD, N, R, taus):
+def F_mat_lag(g, gC, pref_list, dep_order, rho, logD, N, R, taus):
     RE = resource_eating(pref_list, dep_order)
     tau_mod = tau_gtoG(taus, pref_list, dep_order)
-    G = G_mat(g, pref_list, dep_order, N, R)
+    # G = G_mat(g, pref_list, dep_order, N, R)
+    G = G_mat_diaux_hwa(g, gC, pref_list, dep_order, rho)
     _, t_iter, S, tau_mod = tsolve_iter(G, RE, taus, tau_mod, logD)
     F_mat = np.zeros([R, N])
     G_mod = G*(S>0)
@@ -529,10 +530,12 @@ def F_mat_lag(g, pref_list, dep_order, logD, N, R, taus):
                 F_mat[species, RE[species, niche]-1] = coeff * (exp(current_growth) - 1)
     return np.transpose(F_mat)
 
-def b_to_b_hwa_lag(g, gC, dep_order, G, t, F, S, tau_mod, env, i, j):
+def b_to_b_hwa_lag(g, gC, dep_order, G, t, F, S, tau_mod, env, rho, i, j):
     effect = int(i==j)
     R = env["R"]
     N = env["N"]
+    rho_expand = np.tile(rho, (R, 1))
+    g_real = 1/(1/(g*(rho_expand+(1-rho_expand)*R))+1/gC)
     G = G*(S>0)
     # how B changes T
     term1 = np.zeros(R)
@@ -541,8 +544,8 @@ def b_to_b_hwa_lag(g, gC, dep_order, G, t, F, S, tau_mod, env, i, j):
         t_mod = np.tile(t[:ind+1], [N, 1]) - tau_mod[:, :ind+1]
         B_list = np.exp(np.diag(G[:, :ind+1]@(t_mod.T))) # every bug's growth by Rk depletion
         g_list = G[:, ind] # every bug's growth rate by Rk depletion
-        if( B_list[G[:, ind]==g[:, k-1]] @ g_list[G[:, ind]==g[:, k-1]] > 0):
-            term1[k-1] = 1 / ( B_list[G[:, ind]==g[:, k-1]] @ g_list[G[:, ind]==g[:, k-1]] ) # only consider those bugs eating Rk
+        if( B_list[G[:, ind]==g_real[:, k-1]] @ g_list[G[:, ind]==g_real[:, k-1]] > 0):
+            term1[k-1] = 1 / ( B_list[G[:, ind]==g_real[:, k-1]] @ g_list[G[:, ind]==g_real[:, k-1]] ) # only consider those bugs eating Rk
     term1 = term1 * (-F[:, i])
     # how T changes another B
     term2 = np.zeros(R)
@@ -551,10 +554,10 @@ def b_to_b_hwa_lag(g, gC, dep_order, G, t, F, S, tau_mod, env, i, j):
     term2[dep_order[-1]-1] = G[j, R-1]
     effect += term1@term2
     return effect
-def Pert_mat_hwa_lag(g, gC, dep_order, G, t, F, S, tau_mod, env):
+def Pert_mat_hwa_lag(g, gC, dep_order, G, t, F, S, tau_mod, rho, env):
     N = env["N"]
     P = np.zeros([N, N])
     for i in range(N):
         for j in range(N):
-            P[i, j] = b_to_b_hwa_lag(g, gC, dep_order, G, t, F, S, tau_mod, env, i, j)
+            P[i, j] = b_to_b_hwa_lag(g, gC, dep_order, G, t, F, S, tau_mod, env, rho, i, j)
     return P
